@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# Nagios/Icinga plugin to send a heartbeat to OpsGenie. Most useful to add
+# as a service to the 'localhost' Nagios/Icinga to get alerted when
+# monitoring/notifications fail.
+#
+# Requires jq (Command-line JSON processor).
+# jq is available as a package on EPEL for example.
+#
+# Author: Hannes Van de Vel - Connexeon
+# Date: 2015/08/18
+
+# Requirements check
+jq=`which jq 2>/dev/null`
+curl=`which curl 2>/dev/null`
+
+( [ ! -f $jq ] || [ ! -f $curl ] ) && \
+( echo "ERROR: You must have jq and curl installed for this plugin to work" && exit -1 )
+
+# Arguments
+while getopts 'a:n:h' OPT; do
+	case $OPT in
+		a)  apiKey=$OPTARG;;
+		n)  nodeName=$OPTARG;;
+		h)  hlp="yes";;
+		*)  unknown="yes";;
+	esac
+done
+
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+# Usage / Help
+HELP="
+usage: $0 [ -a value -n value -h ]
+
+syntax:
+
+-a --> OpsGenie API key
+-n --> A name to identify the heartbeat with OpsGenie
+-h --> Print this help screen
+"
+
+if [ "$hlp" = "yes" -o $# -lt 1 ]; then
+	echo "$HELP"
+	exit -1
+fi
+
+function displaytime {
+	local T=$1
+	local D=$((T/60/60/24))
+	local H=$((T/60/60%24))
+	local M=$((T/60%60))
+	local S=$((T%60))
+	[[ $D > 0 ]] && printf '%d days ' $D
+	[[ $H > 0 ]] && printf '%d hours ' $H
+	[[ $M > 0 ]] && printf '%d mins ' $M
+	[[ $D > 0 || $H > 0 || $M > 0 ]] && printf 'and '
+	printf '%d s\n' $S
+}
+
+apiResponse=`curl -s -XPOST 'https://api.opsgenie.com/v1/json/heartbeat/send' -d ' { "apiKey" : "'"$apiKey"'", "name" : "'"$nodeName"'" }'`
+
+responseCode=`echo $apiResponse | jq '.code'`
+
+if [ "$responseCode" = "200" ] ; then
+	willExpireAt=`echo $apiResponse | jq '.willExpireAt'`
+	now=$(($(date +%s%N)/1000000))
+	diff=$(($(($willExpireAt-$now))/1000))
+	eta=$(displaytime $diff)
+
+	success="Still alive! We're expected to give a new sign of life in $eta the latest|'heartbeat dt'=$now[epochms] 'expires in'=$diff[s]"
+
+	echo $success
+	exit $STATE_OK
+else
+	error=`echo $apiResponse | jq '.error'`
+	failed="Heartbeat stopped! Error $code: $error. Tried these parameters: ApiKey $apiKey, Name $nodeName"
+	echo $failed
+	exit $STATE_CRITICAL
+fi
