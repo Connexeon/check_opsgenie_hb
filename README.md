@@ -20,7 +20,7 @@ The Icinga2 config sample included below sends the Icinga2 constant `NodeName` a
 ## Add plugin to Nagios / Icinga(2)
 Put the plugin on your server in the usual plugin directory.
 
-For Icinga2 you can check for the location in `/etc/icinga2/constants.conf`.
+For Icinga2 you can check for the location in `/etc/icinga2/constants.conf`:
 ```icinga2
 const PluginDir = "/opt/monitoring-plugins/libexec"
 ```

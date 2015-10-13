@@ -71,7 +71,7 @@ if [ "$responseCode" = "200" ] ; then
 	diff=$(($(($willExpireAt-$now))/1000))
 	eta=$(displaytime $diff)
 
-	success="Still alive! We're expected to give a new sign of life in $eta the latest|'heartbeat dt'=$now[epochms] 'expires in'=$diff[s]"
+	success="Still alive! We're expected to give a new sign of life in $eta the latest|'expires in'=$diff s;;;;"
 
 	echo $success
 	exit $STATE_OK
