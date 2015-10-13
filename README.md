@@ -35,18 +35,32 @@ Make sure your checks run faster than the expire interval of the heartbeat you c
 ```icinga2
 const OpsGenieAPIKey = "your-api-key"
 
-apply Service "opsgenie-hb" {
-    import "generic-service"
-    check_command = "opsgenie-hb"
-    assign where host.name == NodeName
-}
-
 object CheckCommand "opsgenie-hb" {
     import "plugin-check-command"
     command = [ PluginDir + "/check_opsgenie_hb" ]
     arguments = {
-        "-a" = OpsGenieAPIKey
-        "-n" = NodeName
+        "-a" = {
+            required = true
+            value = ApiKey
+        }
+        "-n" = {
+            required = true
+            value = NodeName
+        }
+        "-w" = "$expiration_warn$"
+        "-c" = "$expiration_crit$"
     }
 }
+
+apply Service "opsgenie-hb" {
+    import "generic-service"
+    check_command = "opsgenie-hb"
+
+    vars.expiration_warn = "60"
+    // Warning when the heartbeat runs <= 60 seconds before expiration
+    vars.expiration_crit = ""
+
+    assign where host.name == NodeName
+}
+
 ```

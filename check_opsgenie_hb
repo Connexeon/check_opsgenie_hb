@@ -31,8 +31,8 @@ while getopts 'a:n:w:c:hV' OPT; do
 		h)  hlp="yes";;
 		V)  version="yes";;
 		\? ) echo "Unknown option: -$OPTARG" >&2; exit 1;;
-	:  ) echo "Missing option argument for -$OPTARG" >&2; exit 1;;
-	*  ) echo "Unimplemented option: -$OPTARG" >&2; exit 1;;
+		:  ) echo "Missing option argument for -$OPTARG" >&2; exit 1;;
+		*  ) echo "Unimplemented option: -$OPTARG" >&2; exit 1;;
 	esac
 done
 
@@ -142,12 +142,12 @@ if [ "$responseCode" = "200" ] ; then
 			echo "CRITICAL - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
 			exit $STATE_WARNING
 		fi
+	fi
 
-		if [ $warning ] ; then
-			if [ $(($diffToExpire <= $warning)) ] ; then
-				echo "WARNING - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
-				exit $STATE_WARNING
-			fi
+	if [ $warning ] ; then
+		if [ $(($diffToExpire <= $warning)) ] ; then
+			echo "WARNING - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
+			exit $STATE_WARNING
 		fi
 	fi
 	success="OK - Still alive! Heartbeat $formattedTimeToExpire before it expired, $formattedTimeSinceLast since the previous|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
