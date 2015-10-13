@@ -4,80 +4,159 @@
 # as a service to the 'localhost' Nagios/Icinga to get alerted when
 # monitoring/notifications fail.
 #
-# Requires jq (Command-line JSON processor).
+# Requires jq (Command-line JSON processor) & curl.
 # jq is available as a package on EPEL for example.
 #
-# Author: Hannes Van de Vel - Connexeon
-# Date: 2015/08/18
-
-# Requirements check
-jq=`which jq 2>/dev/null`
-curl=`which curl 2>/dev/null`
-
-( [ ! -f $jq ] || [ ! -f $curl ] ) && \
-( echo "ERROR: You must have jq and curl installed for this plugin to work" && exit -1 )
-
-# Arguments
-while getopts 'a:n:h' OPT; do
-	case $OPT in
-		a)  apiKey=$OPTARG;;
-		n)  nodeName=$OPTARG;;
-		h)  hlp="yes";;
-		*)  unknown="yes";;
-	esac
-done
+# (c) 2015 - Hannes Van de Vel (https://github.com/hannesbe/check_opsgenie_hb)
 
 STATE_OK=0
 STATE_WARNING=1
 STATE_CRITICAL=2
 STATE_UNKNOWN=3
 
+# Requirements check
+jq=`which jq 2>/dev/null`
+curl=`which curl 2>/dev/null`
+
+( [ ! -f $jq ] || [ ! -f $curl ] ) && \
+( echo "UNKNOWN - You must have jq and curl installed for this plugin to work" && exit $STATE_UNKNOWN )
+
+# Arguments
+while getopts 'a:n:w:c:hV' OPT; do
+	case $OPT in
+		a)  apiKey=$OPTARG;;
+		n)  nodeName=$OPTARG;;
+		w)  warning=$OPTARG;;
+		c)  critical=$OPTARG;;
+		h)  hlp="yes";;
+		V)  version="yes";;
+		\? ) echo "Unknown option: -$OPTARG" >&2; exit 1;;
+	:  ) echo "Missing option argument for -$OPTARG" >&2; exit 1;;
+	*  ) echo "Unimplemented option: -$OPTARG" >&2; exit 1;;
+	esac
+done
+
 # Usage / Help
+VERSION="check_opsgenie_hb v1.0.0
+"
 HELP="
-usage: $0 [ -a value -n value -h ]
+This plugin sends a heartbeat to OpsGenie.
+(c) 2015 - Hannes Van de Vel (https://github.com/hannesbe/check_opsgenie_hb)
 
-syntax:
+usage: $0 -a <api key> -n <heartbeat name> [-w warn] [-c crit] [-h] [-V]
 
--a --> OpsGenie API key
--n --> A name to identify the heartbeat with OpsGenie
--h --> Print this help screen
+Options:
+-a
+OpsGenie API key
+-n
+A name to identify the heartbeat with OpsGenie
+-w
+Return warning when amount of time to heartbeat expiration is lower
+than value. Indicates heartbeat runs too slow. Default off.
+-c
+Return critical when amount of time to heartbeat expiration is lower
+than value. Indicates heartbeat runs too slow. Default off.
+-h
+Print this help screen
+-V
+Version information
 "
 
 if [ "$hlp" = "yes" -o $# -lt 1 ]; then
+	echo "$VERSION"
 	echo "$HELP"
-	exit -1
+	exit $STATE_UNKNOWN
+fi
+
+if [ "$version" = "yes" -o $# -lt 1 ]; then
+	echo "$VERSION"
+	exit $STATE_UNKNOWN
+fi
+
+if [ ! $apiKey ]; then
+	echo "UNKNOWN - Option -a <ApiKey> is missing."
+	exit $STATE_UNKNOWN
+fi
+
+if [ ! $nodeName ]; then
+	echo "UNKNOWN - Option -n <NodeName> is missing."
+	exit $STATE_UNKNOWN
 fi
 
 function displaytime {
+	# Returns a human readable formatted time interval from epoch
 	local T=$1
 	local D=$((T/60/60/24))
 	local H=$((T/60/60%24))
 	local M=$((T/60%60))
 	local S=$((T%60))
-	[[ $D > 0 ]] && printf '%d days ' $D
-	[[ $H > 0 ]] && printf '%d hours ' $H
-	[[ $M > 0 ]] && printf '%d mins ' $M
-	[[ $D > 0 || $H > 0 || $M > 0 ]] && printf 'and '
-	printf '%d s\n' $S
+	[[ $D > 0 ]] && printf '%dd ' $D
+	[[ $H > 0 ]] && printf '%dh ' $H
+	[[ $M > 0 ]] && printf '%dm ' $M
+	#	[[ $D > 0 || $H > 0 || $M > 0 ]] && printf 'and '
+	printf '%ds\n' $S
 }
 
-apiResponse=`curl -s -XPOST 'https://api.opsgenie.com/v1/json/heartbeat/send' -d ' { "apiKey" : "'"$apiKey"'", "name" : "'"$nodeName"'" }'`
+now=$(($(date +%s%N)/1000000))
 
+# First do an API request to get the last heartbeat time
+lastHeartbeat=0
+apiResponse=`curl -s -XGET 'https://api.opsgenie.com/v1/json/heartbeat?apiKey='"$apiKey"'&name='"$nodeName"''`
+heartbeatID=`echo $apiResponse | jq '.id'`
+
+if [ $heartbeatID ] ; then
+	lastHeartbeat=`echo $apiResponse | jq '.lastHeartbeat'`
+	interval=`echo $apiResponse | jq '.interval'`
+	intervalUnit=`echo $apiResponse | jq '.intervalUnit'`
+
+	if [[ $intervalUnit = *"hours"* ]] ; then
+		multiplier=3600000
+	fi
+	if [[ $intervalUnit = *"minutes"* ]] ; then
+		multiplier=60000
+	fi
+
+	calcExpireAt=$(($((($interval*$multiplier)+$lastHeartbeat))))
+	intervalSeconds=$(($(($interval*$multiplier))/1000))
+else
+	error=`echo $apiResponse | jq '.error'`
+	failed="Unable to get heartbeat status! Error $code: $error. Tried these parameters: ApiKey $apiKey, Name $nodeName"
+	echo $failed
+	exit $STATE_CRITICAL
+fi
+
+# Submit the actual heartbeat to the API
+apiResponse=`curl -s -XPOST 'https://api.opsgenie.com/v1/json/heartbeat/send' -d ' { "apiKey" : "'"$apiKey"'", "name" : "'"$nodeName"'" }'`
 responseCode=`echo $apiResponse | jq '.code'`
 
 if [ "$responseCode" = "200" ] ; then
 	willExpireAt=`echo $apiResponse | jq '.willExpireAt'`
-	now=$(($(date +%s%N)/1000000))
 	diff=$(($(($willExpireAt-$now))/1000))
-	eta=$(displaytime $diff)
+	diffToExpire=$(($(($calcExpireAt-$now))/1000))
+	diffSinceLast=$(($(($now-$lastHeartbeat))/1000))
+	formattedTimeSinceLast=$(displaytime $diffSinceLast)
+	formattedTimeToExpire=$(displaytime $diffToExpire)
 
-	success="Still alive! We're expected to give a new sign of life in $eta the latest|'expires in'=$diff s;;;;"
+	if [ $critical ] ; then
+		if [ $(($diffToExpire <= $critical)) ] ; then
+			echo "CRITICAL - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
+			exit $STATE_WARNING
+		fi
+
+		if [ $warning ] ; then
+			if [ $(($diffToExpire <= $warning)) ] ; then
+				echo "WARNING - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
+				exit $STATE_WARNING
+			fi
+		fi
+	fi
+	success="OK - Still alive! Heartbeat $formattedTimeToExpire before it expired, $formattedTimeSinceLast since the previous|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
 
 	echo $success
 	exit $STATE_OK
 else
 	error=`echo $apiResponse | jq '.error'`
-	failed="Heartbeat stopped! Error $code: $error. Tried these parameters: ApiKey $apiKey, Name $nodeName"
+	failed="CRITICAL - Error $code: $error. Tried these parameters: ApiKey $apiKey, Name $nodeName"
 	echo $failed
 	exit $STATE_CRITICAL
 fi
