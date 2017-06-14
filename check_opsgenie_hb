@@ -109,6 +109,9 @@ if [ $heartbeatID ] ; then
 	interval=`echo $apiResponse | jq '.interval'`
 	intervalUnit=`echo $apiResponse | jq '.intervalUnit'`
 
+	if [[ $intervalUnit = *"days"* ]] ; then
+		multiplier=86400000
+	fi
 	if [[ $intervalUnit = *"hours"* ]] ; then
 		multiplier=3600000
 	fi
@@ -137,15 +140,15 @@ if [ "$responseCode" = "200" ] ; then
 	formattedTimeSinceLast=$(displaytime $diffSinceLast)
 	formattedTimeToExpire=$(displaytime $diffToExpire)
 
-	if [ $critical ] ; then
-		if [ $(($diffToExpire <= $critical)) ] ; then
+	if [ -n "$critical" ] ; then
+		if [ $diffToExpire -lt $critical ] ; then
 			echo "CRITICAL - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
-			exit $STATE_WARNING
+			exit $STATE_CRITICAL
 		fi
 	fi
 
-	if [ $warning ] ; then
-		if [ $(($diffToExpire <= $warning)) ] ; then
+	if [ -n "$warning" ] ; then
+		if [ $diffToExpire -lt $warning ] ; then
 			echo "WARNING - Heartbeat OK, but it almost expired in $formattedTimeToExpire. Increase heartbeat interval or lower expected heartbeat interval with OpsGenie|'time before expiration'="$diffToExpire"s;"$warning";"$critical";0;"$intervalSeconds" 'time since last heartbeat'="$diffSinceLast"s;;;0;"$intervalSeconds""
 			exit $STATE_WARNING
 		fi
